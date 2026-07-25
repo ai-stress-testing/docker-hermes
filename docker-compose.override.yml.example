@@ -1,0 +1,21 @@
+# Optional opt-in, debugging-only: publish the backend's port directly to
+# the host (e.g. to `curl localhost:8001/health` or hit /v1/chat/completions
+# without going through the Hermes UI).
+#
+# This is NOT needed for normal use: the browser round-trip already works
+# by default — hermes/nginx.conf reverse-proxies /v1/ to the backend
+# service internally, so a browser talking to the Hermes UI can complete a
+# chat request without the backend ever being published to the host (PRD
+# requirement 9). Use this override only when you specifically need to
+# reach the backend directly, bypassing the UI/proxy:
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   docker compose up -d --build
+#   curl localhost:8001/health
+#
+# Don't ship this override in a deployed/shared environment.
+
+services:
+  backend:
+    ports:
+      - "127.0.0.1:8001:8000"

@@ -1,0 +1,110 @@
+# Hermes UI + backend connector for a locally hosted LM Studio instance.
+#
+# Network layout: a single bridge network `hermes-net` joins `hermes`
+# (the only service published to the host) and `backend` (internal only,
+# no host port). There is no `lmstudio` service defined here on purpose:
+# LM Studio is the user's existing local install, run independently of
+# this stack, not something this repo builds or manages the lifecycle
+# of. The backend reaches it with an outbound HTTP connection to
+# LMSTUDIO_URL (default http://host.docker.internal:1234 — see
+# .env.example). Defining an `lmstudio` service with no image to build
+# would be a fake placeholder container and would contradict the PRD:
+# LM Studio stays independent of Hermes, runs the models, and the
+# backend just connects out to it.
+#
+# BACKEND_URL below is the URL baked into the UI's served config.js,
+# which runs in the user's *browser* (hermes/app.js fetches
+# `${BACKEND_URL}/v1/chat/completions`). The default is an empty string,
+# so the browser makes a same-origin relative request back to the
+# `hermes` container (http://localhost:${HERMES_PORT}/v1/...), which
+# nginx reverse-proxies internally to `backend:8000` on hermes-net (see
+# hermes/nginx.conf) — the browser never talks to backend directly and
+# backend is never published to the host. See
+# docker-compose.override.yml.example for the separate, debugging-only
+# option of publishing backend's port directly (e.g. for curl).
+
+networks:
+  hermes-net:
+    driver: bridge
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: docker-hermes-backend:local
+    restart: unless-stopped
+    networks:
+      - hermes-net
+    # No `ports:` here — backend is reachable only from other containers
+    # on hermes-net. See docker-compose.override.yml.example to opt in
+    # to a host-published port for local debugging/browser testing.
+    environment:
+      LMSTUDIO_URL: ${LMSTUDIO_URL:-http://host.docker.internal:1234}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-default}
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      READY_CHECK_TIMEOUT: ${READY_CHECK_TIMEOUT:-2}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-2000000}
+    # Docker Desktop (macOS/Windows) already resolves
+    # host.docker.internal automatically; native Docker Engine on Linux
+    # does not, so this mapping makes the default LMSTUDIO_URL work
+    # there too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  hermes:
+    build:
+      context: ./hermes
+      dockerfile: Dockerfile
+    image: docker-hermes-ui:local
+    restart: unless-stopped
+    ports:
+      # The only service published to the host in the default stack.
+      - "${HERMES_PORT:-8080}:8080"
+    networks:
+      - hermes-net
+    environment:
+      # Empty by default — see the BACKEND_URL note above. Not
+      # `${BACKEND_URL:-}` by accident: the entrypoint script
+      # (docker-entrypoint.d/20-hermes-config.sh) distinguishes "unset"
+      # from "explicitly empty", so this must actually reach the
+      # container as an empty string, not be skipped.
+      BACKEND_URL: ${BACKEND_URL:-}
+    # Not gated on backend's healthcheck: hermes only serves static
+    # files and doesn't need the backend up to do that; a chat request
+    # made before backend is healthy just fails client-side like any
+    # other transient backend outage. Compose still starts backend
+    # first since it's declared first and has no reason to race.
+    depends_on:
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /run/hermes-config:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+# No named volumes: neither service holds state that needs to survive a
+# restart, and the PRD has no persistent-storage requirement.
