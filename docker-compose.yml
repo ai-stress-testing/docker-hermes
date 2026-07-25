@@ -1,0 +1,17 @@
+services:
+  agent:
+    build: ./agent
+    image: docker-hermes-agent
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./workspace:/workspace
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    restart: "no"
