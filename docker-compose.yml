@@ -1,17 +1,38 @@
 services:
-  agent:
-    build: ./agent
-    image: docker-hermes-agent
-    read_only: true
-    tmpfs:
-      - /tmp
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    stdin_open: true
+    tty: true
+    # The single passthrough: all of Hermes's persistent state (config,
+    # API keys, sessions, memories, skills, and the per-profile home
+    # directory its tool subprocesses use as a working directory) lives
+    # under /opt/data. That's also where files it creates land on the
+    # host - one directory in, one directory out, nothing else.
     volumes:
-      - ./workspace:/workspace
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+      - ./hermes-data:/opt/data
+    env_file: .env
+    # host-gateway resolves host.docker.internal to the host's IP so the
+    # container can reach LM Studio. Note this is a routing entry, not a
+    # firewall rule - it doesn't scope reachability to LM Studio's port
+    # alone, and the default bridge network here still has ordinary
+    # outbound access. See README "The sandbox boundary" for what
+    # actually bounds this deployment (it isn't the network).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file: .env
+    security_opt:
+      - no-new-privileges:true
+    # Deliberately no cpus/mem_limit/GPU reservation - full host
+    # hardware by Docker's default, unrestricted, as requested.
+    #
+    # Deliberately NOT setting read_only/cap_drop here, unlike a
+    # from-scratch image we'd fully control: this image's entrypoint
+    # (s6-overlay) intentionally starts as root to fix up volume
+    # permissions before dropping to its own non-root user internally,
+    # and its write patterns beyond /opt/data aren't documented in
+    # enough detail to harden blind without breaking startup - and this
+    # sandbox can't pull/run the real image to verify. Flagged as a
+    # follow-up, not silently skipped - see README.
+    #
+    # Deliberately no `ports:` - this runs as an interactive CLI, never
+    # a network-facing service, so nothing needs to be published.
     restart: "no"

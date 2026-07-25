@@ -1,12 +1,7 @@
 # Environment
 .env
 
-# Sandbox workspace contents (keep the directory, not what's generated in it)
-workspace/*
-!workspace/.gitkeep
-
-# Python artifacts
-__pycache__/
-*.py[cod]
-*.pyo
-.pytest_cache/
+# Hermes's persistent data (config, keys, sessions, memories, skills,
+# and files it creates) - keep the directory, not what's generated in it
+hermes-data/*
+!hermes-data/.gitkeep
