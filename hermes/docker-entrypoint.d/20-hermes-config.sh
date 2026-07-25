@@ -22,11 +22,28 @@ BACKEND_URL="${BACKEND_URL-http://localhost:8000}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-30}"
 MAX_REQUEST_BODY_BYTES="${MAX_REQUEST_BODY_BYTES:-2000000}"
 
+# backend/app/config.py types REQUEST_TIMEOUT as a float (e.g. "90.5" is
+# valid input there), but shell arithmetic below is integer-only. Drop
+# any fractional part rather than rejecting the whole value outright — a
+# falsifier pass on an earlier version of this script found that
+# rejecting non-integer input reset the proxy timeout to the 30s
+# default *silently*, capping the effective request timeout below
+# whatever the operator actually configured. Whatever's left still has
+# to be a plain non-negative integer, or this falls back to 30s, loudly.
 case "$REQUEST_TIMEOUT" in
-    ''|*[!0-9]*) REQUEST_TIMEOUT=30 ;;
+    *.*) REQUEST_TIMEOUT="${REQUEST_TIMEOUT%%.*}" ;;
+esac
+case "$REQUEST_TIMEOUT" in
+    ''|*[!0-9]*)
+        echo "WARN: REQUEST_TIMEOUT is not a valid number of seconds; using 30s" >&2
+        REQUEST_TIMEOUT=30
+        ;;
 esac
 case "$MAX_REQUEST_BODY_BYTES" in
-    ''|*[!0-9]*) MAX_REQUEST_BODY_BYTES=2000000 ;;
+    ''|*[!0-9]*)
+        echo "WARN: MAX_REQUEST_BODY_BYTES is not a valid non-negative integer; using 2000000" >&2
+        MAX_REQUEST_BODY_BYTES=2000000
+        ;;
 esac
 
 # A little more generous than the backend's own REQUEST_TIMEOUT so nginx

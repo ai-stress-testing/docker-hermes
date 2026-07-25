@@ -13,8 +13,22 @@ set -eu
 
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-30}"
 
+# backend/app/config.py types REQUEST_TIMEOUT as a float, so fractional
+# values are valid input; shell arithmetic below is integer-only. Drop
+# the fractional part rather than rejecting the whole value — see the
+# matching comment in hermes/docker-entrypoint.d/20-hermes-config.sh,
+# which hit this as a real regression (non-integer REQUEST_TIMEOUT was
+# silently resetting the proxy timeout to 30s). Same fix, same reasoning,
+# applied here too so this script's fallback can't drift below the
+# proxy's.
 case "$REQUEST_TIMEOUT" in
-    ''|*[!0-9]*) REQUEST_TIMEOUT=30 ;;
+    *.*) REQUEST_TIMEOUT="${REQUEST_TIMEOUT%%.*}" ;;
+esac
+case "$REQUEST_TIMEOUT" in
+    ''|*[!0-9]*)
+        echo "WARN: REQUEST_TIMEOUT is not a valid number of seconds; using 30s" >&2
+        REQUEST_TIMEOUT=30
+        ;;
 esac
 
 if [ "$REQUEST_TIMEOUT" -gt 5 ]; then
