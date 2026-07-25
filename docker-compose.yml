@@ -1,37 +1,78 @@
 services:
   hermes:
-    image: nousresearch/hermes-agent:latest
+    # Pinned to a specific release, not :latest - this container executes
+    # shell/tool commands autonomously based on LLM output, so a floating
+    # tag would mean every recreate silently trusts whatever Docker Hub
+    # currently resolves it to, with no review step. Bump deliberately.
+    image: nousresearch/hermes-agent:v2026.7.20
     stdin_open: true
     tty: true
-    # The single passthrough: all of Hermes's persistent state (config,
-    # API keys, sessions, memories, skills, and the per-profile home
-    # directory its tool subprocesses use as a working directory) lives
-    # under /opt/data. That's also where files it creates land on the
-    # host - one directory in, one directory out, nothing else.
+    # The single passthrough. Confirmed directly from the image's own
+    # Dockerfile (github.com/NousResearch/hermes-agent, main, fetched
+    # 2026-07-25): `VOLUME ["/opt/data"]` is the only declared volume,
+    # and `HERMES_WRITE_SAFE_ROOT=/opt/data` is set at the image level -
+    # the app itself is built to confine its writes there. That's also
+    # where config, API keys, sessions, memories, skills, and the
+    # per-profile home directory tool subprocesses use as a working
+    # directory all live (website/docs/user-guide/docker.md, same repo)
+    # - so it's both the state directory and where files it creates for
+    # you land on the host.
     volumes:
       - ./hermes-data:/opt/data
     env_file: .env
     # host-gateway resolves host.docker.internal to the host's IP so the
-    # container can reach LM Studio. Note this is a routing entry, not a
-    # firewall rule - it doesn't scope reachability to LM Studio's port
-    # alone, and the default bridge network here still has ordinary
-    # outbound access. See README "The sandbox boundary" for what
-    # actually bounds this deployment (it isn't the network).
+    # container can reach LM Studio. This is a routing entry, not a
+    # firewall rule: it doesn't scope reachability to LM Studio's port
+    # alone, and this service's network (Compose's own project network,
+    # not Docker's docker0 default bridge) still has ordinary outbound
+    # access to the host's LAN and the internet. See README "The sandbox
+    # boundary" for what actually bounds this deployment - it isn't the
+    # network.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     security_opt:
       - no-new-privileges:true
+    # The image's entrypoint (/init, s6-overlay - confirmed from the
+    # Dockerfile) starts as root to fix up /opt/data's ownership, then
+    # drops to its own non-root user internally. cap_drop: ALL plus this
+    # explicit allowlist keeps exactly the capabilities that root-then-
+    # drop needs (ownership fixup, the uid/gid switch itself) and removes
+    # everything else Docker grants by default - NET_RAW (ARP/raw-socket
+    # access on the shared bridge), NET_BIND_SERVICE (irrelevant, this
+    # never listens), MKNOD, AUDIT_WRITE, SYS_CHROOT, SETFCAP beyond what's
+    # listed. Unlike the filesystem question above, capability need here
+    # doesn't depend on knowing the app's internal write patterns, so
+    # there was no reason to defer this the way an earlier version of
+    # this file did.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - SETPCAP
+    # Read-only root filesystem, now that the Dockerfile confirms there's
+    # nowhere else the app writes. tmpfs covers what a Linux init system
+    # (s6-overlay) and short-lived processes typically still need at
+    # runtime even when the application itself is fully confined to
+    # /opt/data.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/run
+    # This whole hardening block (cap_drop/cap_add/read_only/tmpfs) is
+    # grounded in the Dockerfile, not run against the real image - Docker
+    # Hub isn't reachable and the daemon needs root in this environment,
+    # so it couldn't be pulled/started to confirm boot still succeeds
+    # under these constraints. If the container fails to start, that's
+    # the first block to loosen (try dropping read_only first, then the
+    # cap_drop/cap_add pair) - see README.
+    #
     # Deliberately no cpus/mem_limit/GPU reservation - full host
     # hardware by Docker's default, unrestricted, as requested.
-    #
-    # Deliberately NOT setting read_only/cap_drop here, unlike a
-    # from-scratch image we'd fully control: this image's entrypoint
-    # (s6-overlay) intentionally starts as root to fix up volume
-    # permissions before dropping to its own non-root user internally,
-    # and its write patterns beyond /opt/data aren't documented in
-    # enough detail to harden blind without breaking startup - and this
-    # sandbox can't pull/run the real image to verify. Flagged as a
-    # follow-up, not silently skipped - see README.
     #
     # Deliberately no `ports:` - this runs as an interactive CLI, never
     # a network-facing service, so nothing needs to be published.
