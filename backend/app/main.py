@@ -38,7 +38,17 @@ async def lifespan(app: FastAPI):
         await app.state.http_client.aclose()
 
 
-app = FastAPI(title="Hermes Local LM Studio Connector", lifespan=lifespan)
+# docs/redoc/openapi are disabled: this MVP has no auth (explicit
+# non-goal) and the PRD requires no debug endpoints exposed. They're not
+# reachable through nginx's default proxy path anyway (only /v1/ is
+# forwarded), but the backend shouldn't rely on that as its only control.
+app = FastAPI(
+    title="Hermes Local LM Studio Connector",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # Middleware order: added last runs outermost, so the body-size guard runs
 # before the request is logged/routed at all.

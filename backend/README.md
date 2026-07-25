@@ -48,3 +48,13 @@ LMSTUDIO_URL=http://localhost:1234 DEFAULT_MODEL=your-model-name \
   the backend always makes a single non-streaming call to LM Studio and
   returns a single JSON body.
 - Request/response body content (prompts) is never logged.
+- `/docs`, `/redoc`, and `/openapi.json` are disabled (`docs_url`,
+  `redoc_url`, `openapi_url` all `None` in `main.py`) — no debug/schema
+  endpoints exposed, per the PRD's security requirements.
+- In the container, `docker-entrypoint.sh` starts uvicorn with
+  `--timeout-graceful-shutdown` set to `REQUEST_TIMEOUT - 5`, and
+  `docker-compose.yml` sets `stop_grace_period: ${REQUEST_TIMEOUT}s` on
+  the service — both derived from the same `REQUEST_TIMEOUT`, so a
+  request still legitimately waiting on LM Studio isn't SIGKILLed by
+  Docker's default 10s shutdown deadline when the container stops or is
+  recreated.

@@ -34,6 +34,12 @@ services:
       dockerfile: Dockerfile
     image: docker-hermes-backend:local
     restart: unless-stopped
+    # Must stay >= REQUEST_TIMEOUT so Docker never SIGKILLs a request
+    # that's still legitimately waiting on LM Studio.
+    # backend/docker-entrypoint.sh bounds uvicorn's own graceful-shutdown
+    # wait to REQUEST_TIMEOUT-5s so it finishes (and uvicorn exits on its
+    # own) before this deadline, rather than racing it.
+    stop_grace_period: ${REQUEST_TIMEOUT:-30}s
     networks:
       - hermes-net
     # No `ports:` here — backend is reachable only from other containers
@@ -84,6 +90,12 @@ services:
       # from "explicitly empty", so this must actually reach the
       # container as an empty string, not be skipped.
       BACKEND_URL: ${BACKEND_URL:-}
+      # Mirror the backend's own values so nginx's proxy_read_timeout and
+      # client_max_body_size (rendered at container start — see
+      # docker-entrypoint.d/20-hermes-config.sh) never silently diverge
+      # from what the backend itself is actually configured to allow.
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-30}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-2000000}
     # Not gated on backend's healthcheck: hermes only serves static
     # files and doesn't need the backend up to do that; a chat request
     # made before backend is healthy just fails client-side like any
